@@ -11,6 +11,8 @@ VERBOSE 		 		= yes
 # DEBUG_MATRIX		 	= yes
 CONSOLE_ENABLE 			= yes
 
+SRC += map_queue.c vortus_engine.c
+
 # A bunch of stuff that you shouldn't touch unless you
 # know what you're doing.
 #

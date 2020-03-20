@@ -5,10 +5,18 @@
  *
  * There's also a template for adding new layers at the bottom of this file!
  */
-
-#include QMK_KEYBOARD_H
+#ifdef QMK_KEYBOARD_H
+    #include QMK_KEYBOARD_H
+#else
+    #include "../../gergoplex.h"
+    #include "../../config.h"
+#endif
+#include "map_queue.h"
 #include "vortus_engine.h"
-#include <print.h>
+#include "chords.h"
+#ifdef TESTING
+    #include <print.h>
+#endif
 #define HOLD_TIME 300
 
 #define BASE 0 // default layer
@@ -17,32 +25,34 @@
 const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 /* Keymap 0: Basic layer
  *
- * ,-----------------------------.       ,--------------------------------.
- * |    Q |  W  |  E  |  R  |  T  |      |  Y  |  U  |  I  |  O  |    P   |
- * |-----+-----+-----+-----+------|      |--------------------------------|
- * |CTRL/A|  S  |  D  |  F  |  G  |      |  H  |  J  |  K  |  L  | CTRL/; |
- * |-----+-----+-----+-----+------+		   |--------------------------------|
- * |SHFT/Z|  X  |  C  |  V  |  B  |      |  N  |  M  |  <  |  >  | SHFT/? |
- * `------+-----+-----+------+----'		   `--------------------------------'
- *  .-------------------------.           .-----------------.
- *  |ESC/META|ENT/ALT|SPC(SYM)|           |SPC(NUM)|BSPC|TAB|
- *  '-------------------------'           '-----------------'
+ * ,----------------------------.       ,-----------------------------.
+ * |  Q  |  D  |  R  |  W  |  B  |      |  J  |  F  |  U  |  P  |  ;  |
+ * |-----+-----+-----+-----+-----|      |-----+-----+-----+-----+-----|
+ * |  A  |  S  |  H  |  T  |  G  |      |  Y  |  N  |  E  |  O  |  I  |
+ * |-----+-----+-----+-----+-----|	    |-----+-----+-----+-----+-----|
+ * |  Z  |  X  |  M  |  C  |  V  |      |  K  |  L  |  ,  |  .  |  /  |
+ * `-----------------------------'	    `-----------------------------'
+ *            .------------------.      .------------------.
+ *            | DEL | LSFT | SPC |      | ENT | TAB | BSPC |
+ *            '------------------'      '------------------'
  */
 [BASE] = LAYOUT_gergoplex(
-    KC_EXLM, KC_AT,   KC_LCBR, KC_RCBR, KC_PIPE,   KC_GRV,  KC_TILD, KC_TRNS, KC_TRNS, KC_BSLS,
-    KC_HASH, KC_DLR,  KC_LPRN, KC_RPRN, KC_BTN2,   KC_PLUS, KC_MINS, KC_SLSH, KC_ASTR, KC_QUOT,
-    KC_PERC, KC_CIRC, KC_LBRC, KC_RBRC, KC_BTN1,   KC_AMPR, KC_EQL,  KC_COMM, KC_DOT,  KC_MINS,
-                      KC_BTN3, KC_SCLN, KC_EQL,   KC_EQL,  KC_SCLN, KC_DEL															// Right
+    KC_Q,   KC_D,   KC_R,    KC_W, KC_B,    KC_J,   KC_F,   KC_U,    KC_P,   KC_COLN,
+    KC_A,   KC_S,   KC_H,    KC_T, KC_G,    KC_Y,   KC_N,   KC_E,    KC_O,   KC_I,
+    KC_Z,   KC_X,   KC_M,    KC_C, KC_V,    KC_K,   KC_L,   KC_COMM, KC_DOT, KC_SLASH,
+            KC_DEL, KC_LSFT, KC_SPC,        KC_ENT, KC_TAB, KC_BSPC
     )
 };
 
-
-uint64_t keymap = 0llu;
-uint64_t new_keymap = 0llu;
+uint64_t new_key_mask = 0llu;
+uint64_t new_mask = 0llu;
+uint64_t prev_mask = 0llu;
 uint64_t largest_chord = 0llu;
+uint64_t send_mask = 0llu;
+short chord_code = 0;
 bool unpressing = false;
-uint16_t *tmp_test = (uint16_t *)&new_keymap;
-uint16_t *tmp_test_2 = (uint16_t *)&keymap;
+bool subset = false;
+
 
 bool process_record_user(uint16_t keycode, keyrecord_t *record) {
 
@@ -59,131 +69,119 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
      *    keycode dependent. This still leaves plenty of options and functions well with QMK though.
      * */
 
-    new_keymap = (1llu << ((record->event.key.row + (MATRIX_ROWS * record->event.key.col))));
-
     // Translate the row-column to a bitwise position ((row + (width * col)) - 1)
+    new_key_mask = (1llu << ((record->event.key.row + (MATRIX_ROWS * record->event.key.col))));
+
     if (record->event.pressed){
-        keymap = new_keymap | keymap;
+        set_entry(&map, &new_key_mask, &keycode);
+        new_mask = new_key_mask | prev_mask;
     } else {
-        keymap = (~new_keymap) & keymap;
+        new_mask = (~new_key_mask) & prev_mask;
     }
 
-    if (true){
-        dprintf("\r\nPressed: %s", record->event.pressed ? "True" : "False");
-        dprintf("\r\nRow: %d, Col: %d", record->event.key.row, record->event.key.col);
+    // #ifdef TESTING
+    //     dprintf("new key mask ");
+    //     printChord(&new_mask);
+    //     dprintf("\r\n");
+    // #endif
 
-        dprint("\r\nKey : ");
+    if (record->event.pressed){
 
-        for(uint8_t i = 0; i < 4; i++) {
-            dprintf("%ux", tmp_test[i]);
-        }
-
-        dprint("\r\nMask: ");
-
-        for(uint8_t i = 0; i < 4; i++) {
-            dprintf("%ux", tmp_test_2[i]);
-        }
-
-        for(uint16_t i = 0; i < 36; i++) {
-            if (new_keymap == key_to_binary[i]){
-                dprintf("\r\nKeyToBinary: %u", i);
-                break;
-            }
-        }
-
-        for(uint16_t i = 0; i < 36; i++) {
-            if (keymap == chords[i]){
-                dprintf("\r\nChord: %u", i);
-                break;
-            }
-        }
-
-        dprint("\r\n");
-    }
-
-    return false;
-
-    // If the record is a de-press, ensure the bitwise position is 0, otherwise set it to 1
-    if (!record->event.pressed){
-        new_keymap = ~new_keymap & keymap;
-    } else {
-        new_keymap = new_keymap | keymap;
-    }
-
-    // a) Sending a chord if the user is depressing the chord
-    // If our keymap's value is less than the old keymap, then something has been depressed and we can send the chord
-    //   once, if something new is pressed then the value is greater and we'll rely on the rest of the algorithm to send
-    //   keys if required. The third case of equality indicates holding and will be implemented later
-    if (new_keymap < keymap) {
-        if (!unpressing) {
-            // TODO: Send keymap logic here
-            unpressing = true;
-        }
-        keymap = new_keymap;
-        return false;
-    } else if (new_keymap > keymap) {
-        keymap = new_keymap;
-        unpressing =false;
-    }
-
-    // b) Determine if our keymap is a strict subset, 0 is the subset of all sets so ignore it
-    if (keymap != 0){
-
-        // Zero out our largest chord
+        unpressing = false;
         largest_chord = 0;
+        chord_code = 0;
 
-        for (int i = 0; i < num_chords; i ++) {
+        for (short i = 0; i < num_chords; i ++) {
 
-            // Double check for equality to make our checks only match strict subsets or supersets
-            if (chords[i] != keymap) {
+            /*
+             * If we can find a chord that is a strict superset of the keys we have pressed, then it's safe to exit
+             *   immediately. The intended output cannot be determined (does the user want to press more buttons?), so
+             *   send nothing.
+            */
+            if (chords[i] != new_mask && (chords[i] & new_mask) == new_mask) {
+                #ifdef TESTING
+                    printChord(&new_mask);
+                    dprintf(" subset of chord ");
+                    printChord((uint64_t*)(chords + i));
+                    dprintf("\r\n");
+                #endif
 
-                // Check if the chord from the list is a superset of our current chord
-                if ((chords[i] & keymap) == keymap) {
-                    return false;
+                subset = true;
 
-                // Check if the chord from the list is a subset of our keymap, and larger than the largest chord found
-                //   so far
-                } else if ((chords[i] & keymap) == chords[i] && chords[i] > largest_chord) {
-                    largest_chord = chords[i];
-                }
+                prev_mask = new_mask;
+                return false;
+            }
+
+            /*
+             * If we can find a chord that's a subset (not strict), then make note of it. In the case that we'll be
+             *   sending something, it will be the longest subset found.
+            */
+            if ((chords[i] & new_mask) == chords[i] && count_bits(chords[i]) > count_bits(largest_chord)) {
+                largest_chord = chords[i];
+                chord_code = i;
             }
         }
 
-        // If we're still here that means that the keycode is not a strict subset of another chord, this leaves us with
-        //   the possibility of it being either an exact chord, a superset of another chord, or not a chord at all
+        // If we made it out of the loop we know we didn't detect a subset!
+        subset = false;
 
-        // Check if it's an exact chord (the largest chord found will be the same as our keymap)
-        if (largest_chord == keymap) {
+        /*
+         * If we've found any chord, ane we haven't exited, then we need to send the chord, and any adittional remaining
+         *   keys, conveniently we can just fall through to sending a normal keycode if nothing was found. We set
+         *   unpressing to true here to prevent sending the chord on depress.
+        */
+        if (largest_chord > 0) {
+            #ifdef TESTING
+                dprintf("sending chord ");
+                printChord(&largest_chord);
+                dprintf("\r\n");
+            #endif
 
-            // In this case we just want to send the chord
+            send_mask = (~largest_chord) & new_mask;
+            // TODO: Send largest chord here
+            // TODO: Get remaining chords from map
 
+            unpressing = true;
+
+            prev_mask = new_mask;
             return false;
-
-
-        // Check if it's not a chord at all (the largest chord found will still be 0)
-        } else if (largest_chord == 0) {
-
-            // In this case we want to send the original keycode, this combined with the next option allow clean
-            //   interaction with QMK
-            return true;
-
-        // Check if it's the superset of another chord (the largest chord will not be equal to keymap)
-        } else if (largest_chord != keymap) {
-
-            // In this case we can send the largest chord, followed by returning true. The complicated bit is masking
-            //   out the chord from QMK output
-
-            return true;
-
         }
+    } else {
+        /*
+         * If we found a chord on our last loop, then we need to send it. The `unpressing` boolean ensures we only send
+         *   it once.
+         */
+        if (largest_chord > 0 && !unpressing){
+            #ifdef TESTING
+                dprintf("sending chord ");
+                printChord(&largest_chord);
+                dprintf("\r\n");
+            #endif
 
+            unpressing = true;
 
+            prev_mask = new_mask;
+            return false;
+        } else if (subset && !unpressing){
+
+            #ifdef TESTING
+            dprintf("regular keypress from chord %u\r\n", keycode);
+            #endif
+
+            prev_mask = new_mask;
+            return false;
+        }
     }
 
-    // If all else fails, then just return false
+    #ifdef TESTING
+    if (record->event.pressed){
+        dprintf("fallthroug keypress %u\r\n", keycode);
+    }
+    #endif
+
+    prev_mask = new_mask;
     return false;
 }
-
 
 void keyboard_post_init_user(void) {
   // Customise these values to desired behaviour
@@ -192,3 +190,5 @@ void keyboard_post_init_user(void) {
   //debug_keyboard=true;
   //debug_mouse=true;
 }
+
+
