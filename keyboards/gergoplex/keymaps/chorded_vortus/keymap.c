@@ -40,7 +40,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     KC_Q,   KC_D,   KC_R,    KC_W, KC_B,    KC_J,   KC_F,   KC_U,    KC_P,   KC_COLN,
     KC_A,   KC_S,   KC_H,    KC_T, KC_G,    KC_Y,   KC_N,   KC_E,    KC_O,   KC_I,
     KC_Z,   KC_X,   KC_M,    KC_C, KC_V,    KC_K,   KC_L,   KC_COMM, KC_DOT, KC_SLASH,
-            KC_DEL, KC_LSFT, KC_SPC,        KC_ENT, KC_TAB, KC_BSPC
+            KC_BSPC,KC_LSFT, KC_ENT,        KC_SPC, KC_TAB, KC_DEL
     )
 };
 
@@ -49,10 +49,12 @@ uint64_t new_mask = 0llu;
 uint64_t prev_mask = 0llu;
 uint64_t largest_chord = 0llu;
 uint64_t send_mask = 0llu;
+uint16_t depressed_key = 0;
+uint16_t depress_on_next = 0;
+uint16_t depress_on_next_chord = 0;
 short chord_code = 0;
 bool unpressing = false;
 bool subset = false;
-
 
 bool process_record_user(uint16_t keycode, keyrecord_t *record) {
 
@@ -73,57 +75,65 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
     new_key_mask = (1llu << ((record->event.key.row + (MATRIX_ROWS * record->event.key.col))));
 
     if (record->event.pressed){
+
+        depressed_key = 0;
+
         set_entry(&map, &new_key_mask, &keycode);
-        new_mask = new_key_mask | prev_mask;
+
+        if (IS_MOD(keycode)){
+            return true;
+        } else {
+            set_entry(&map, &new_key_mask, &keycode);
+            new_mask = new_key_mask | prev_mask;
+        }
     } else {
-        new_mask = (~new_key_mask) & prev_mask;
+
+        depressed_key = get_and_remove_entry(&map, &new_key_mask);
+
+        if (IS_MOD(keycode)){
+            return true;
+        } else {
+            new_mask = (~new_key_mask) & prev_mask;
+        }
     }
 
-    // #ifdef TESTING
-    //     dprintf("new key mask ");
-    //     printChord(&new_mask);
-    //     dprintf("\r\n");
-    // #endif
+    largest_chord = 0;
+    chord_code = 0;
+
+    for (short i = 0; i < num_chords; i ++) {
+
+        /*
+        * If we can find a chord that is a strict superset of the keys we have pressed, then it's safe to exit
+        *   immediately. The intended output cannot be determined (does the user want to press more buttons?), so
+        *   send nothing.
+        */
+        if (chords[i] != new_mask && (chords[i] & new_mask) == new_mask) {
+            #ifdef TESTING
+                printChord(&new_mask);
+                dprintf(" subset of chord ");
+                printChord((uint64_t*)(chords + i));
+                dprintf("\r\n");
+            #endif
+
+            subset = true;
+
+            prev_mask = new_mask;
+            return false;
+        }
+
+        /*
+        * If we can find a chord that's a subset (not strict), then make note of it. In the case that we'll be
+        *   sending something, it will be the longest subset found.
+        */
+        if ((chords[i] & new_mask) == chords[i] && count_bits(chords[i]) > count_bits(largest_chord)) {
+            largest_chord = chords[i];
+            chord_code = i;
+        }
+    }
 
     if (record->event.pressed){
 
         unpressing = false;
-        largest_chord = 0;
-        chord_code = 0;
-
-        for (short i = 0; i < num_chords; i ++) {
-
-            /*
-             * If we can find a chord that is a strict superset of the keys we have pressed, then it's safe to exit
-             *   immediately. The intended output cannot be determined (does the user want to press more buttons?), so
-             *   send nothing.
-            */
-            if (chords[i] != new_mask && (chords[i] & new_mask) == new_mask) {
-                #ifdef TESTING
-                    printChord(&new_mask);
-                    dprintf(" subset of chord ");
-                    printChord((uint64_t*)(chords + i));
-                    dprintf("\r\n");
-                #endif
-
-                subset = true;
-
-                prev_mask = new_mask;
-                return false;
-            }
-
-            /*
-             * If we can find a chord that's a subset (not strict), then make note of it. In the case that we'll be
-             *   sending something, it will be the longest subset found.
-            */
-            if ((chords[i] & new_mask) == chords[i] && count_bits(chords[i]) > count_bits(largest_chord)) {
-                largest_chord = chords[i];
-                chord_code = i;
-            }
-        }
-
-        // If we made it out of the loop we know we didn't detect a subset!
-        subset = false;
 
         /*
          * If we've found any chord, ane we haven't exited, then we need to send the chord, and any adittional remaining
@@ -138,12 +148,20 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
             #endif
 
             send_mask = (~largest_chord) & new_mask;
-            // TODO: Send largest chord here
+
+            // This is a decent enough work around for now
+            depress_on_next_chord = chords_codes[chord_code];
+            register_code16(depress_on_next_chord);
+
             // TODO: Get remaining chords from map
 
             unpressing = true;
 
             prev_mask = new_mask;
+
+            // If we made it out of the loop we know we didn't detect a subset, so make sure to reset it
+            subset = false;
+
             return false;
         }
     } else {
@@ -158,6 +176,10 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
                 dprintf("\r\n");
             #endif
 
+            // This is a decent enough work around for now
+            depress_on_next_chord = chords_codes[chord_code];
+            register_code16(depress_on_next_chord);
+
             unpressing = true;
 
             prev_mask = new_mask;
@@ -167,6 +189,9 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
             #ifdef TESTING
             dprintf("regular keypress from chord %u\r\n", keycode);
             #endif
+
+            depress_on_next = keycode;
+            register_code16(keycode);
 
             prev_mask = new_mask;
             return false;
@@ -180,7 +205,22 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
     #endif
 
     prev_mask = new_mask;
-    return false;
+    return true;
+}
+
+void matrix_scan_user(void){
+
+    // If a key has been pressed under a combo, and we depress it. Then send it before the next event.
+    if (depress_on_next > 0){
+        unregister_code16(depress_on_next);
+        depress_on_next = 0;
+    }
+
+    // If a chord has been pressed, depress it
+    if (depress_on_next_chord > 0){
+        unregister_code16(depress_on_next_chord);
+        depress_on_next_chord = 0;
+    }
 }
 
 void keyboard_post_init_user(void) {
