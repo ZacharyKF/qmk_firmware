@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include "vortus_engine.h"
 
+#ifdef TESTING
 short count_bits(uint64_t value){
     short total_bits = 0;
     while (value != 0){
@@ -10,7 +11,6 @@ short count_bits(uint64_t value){
     return total_bits;
 }
 
-#ifdef TESTING
 uint16_t *print_short;
 void printChord(uint64_t* chord){
     print_short = (uint16_t*)chord;
@@ -18,4 +18,9 @@ void printChord(uint64_t* chord){
         dprintf("%u", print_short[i]);
     }
 }
+
+void printShort(uint16_t* chord){
+    dprintf("%u", *chord);
+}
+
 #endif
